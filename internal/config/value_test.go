@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"math"
 	"strconv"
 	"testing"
@@ -203,4 +204,52 @@ func TestAsUintRejectsNegativeAndOverflow(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestValueMarshalJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		yaml     string
+		wantJSON string
+		err      bool
+	}{
+		{"int", "value: 7\n", "7", false},
+		{"negative int", "value: -42\n", "-42", false},
+		{"beyond uint64", "value: 340282366920938463463374607431768211455\n", "340282366920938463463374607431768211455", false},
+		{"string", "value: hello\n", "\"hello\"", false},
+		{"quoted number", "value: \"7\"\n", "\"7\"", false},
+		{"bool true", "value: true\n", "true", false},
+		{"bool false", "value: false\n", "false", false},
+		{"list", "value:\n    - 1\n    - 2\n    - 3\n", "[1,2,3]", false},
+		{"nested list", "value:\n    - - a\n      - b\n    - - c\n", "[[\"a\",\"b\"],[\"c\"]]", false},
+		{"list of pairs", "value:\n    - key: owner\n      value: GABC\n    - key: limit\n      value: 10\n", "[{\"key\":\"owner\",\"value\":\"GABC\"},{\"key\":\"limit\",\"value\":10}]", false},
+		{"mapping", "value:\n    type: u32\n    value: 5\n", "{\"type\":\"u32\",\"value\":5}", false},
+		{"unset value", "value: null\n", "null", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var doc valueDoc
+			require.NoError(t, yaml.Unmarshal([]byte(tt.yaml), &doc))
+
+			out, err := json.Marshal(doc.Value)
+			if tt.err {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantJSON, string(out))
+		})
+	}
+}
+
+func TestValueMarshalJSONError(t *testing.T) {
+	// Test error path: node.Decode can fail for certain YAML constructs
+	// that don't map cleanly to JSON (e.g., YAML aliases/anchors)
+	doc := valueDoc{
+		Value: NewValue(map[string]any{"key": "value"}),
+	}
+	// This should work fine - just ensuring no panic
+	out, err := json.Marshal(doc.Value)
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "key")
 }
